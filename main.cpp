@@ -85,25 +85,22 @@ public:
     }
 
     virtual ~Component() = default;
-    virtual void stamp(vector<vector<double>>& G, Circuit& circuit) = 0;
+    virtual void stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) = 0;
     virtual string to_netlist_string() const = 0;
 };
+
+class VoltageSource; // Forward declare
 
 class Circuit {
 public:
     vector<unique_ptr<Component>> components;
     map<string, int> node_to_idx;
     vector<string> idx_to_node_name;
-    bool ground_node_exists = false;
+    vector<VoltageSource*> voltage_source_list;
     string ground_node_explicit_name = "0";
 
-    void add_component(unique_ptr<Component> comp) {
-        components.push_back(move(comp));
-    }
-
-    bool is_ground(const string& node_name) const {
-        return node_name == ground_node_explicit_name;
-    }
+    void add_component(unique_ptr<Component> comp);
+    bool is_ground(const string& node_name) const { return node_name == ground_node_explicit_name; }
 
     int get_node_matrix_index(const string& node_name) {
         if (is_ground(node_name)) return -1;
@@ -114,39 +111,106 @@ public:
         }
         return node_to_idx.at(node_name);
     }
+
+    int get_voltage_source_matrix_index(const string& vs_name);
 };
 
 class Resistor : public Component {
 public:
     Resistor(const string& r_name, const string& n1, const string& n2, const string& val_str)
-            : Component(r_name, n1, n2, val_str) {
-        if (value <= 0) throw runtime_error("Resistor " + name + " must have positive resistance.");
+            : Component(r_name, n1, n2, val_str) {}
+    string to_netlist_string() const override;
+    void stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) override;
+};
+
+class VoltageSource : public Component {
+public:
+    VoltageSource(const string& v_name, const string& n1, const string& n2, const string& val_str)
+            : Component(v_name, n1, n2, val_str) {}
+    string to_netlist_string() const override;
+    void stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) override;
+};
+
+class CurrentSource : public Component {
+public:
+    CurrentSource(const string& i_name, const string& n1, const string& n2, const string& val_str)
+            : Component(i_name, n1, n2, val_str) {}
+    string to_netlist_string() const override;
+    void stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) override;
+};
+
+// --- Method Implementations ---
+
+void Circuit::add_component(unique_ptr<Component> comp) {
+    if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+        voltage_source_list.push_back(vs);
     }
+    components.push_back(move(comp));
+}
 
-    string to_netlist_string() const override {
-        ostringstream oss;
-        oss << name << " " << node1_name << " " << node2_name << " " << fixed << setprecision(12) << value;
-        return oss.str();
-    }
-
-    void stamp(vector<vector<double>>& G, Circuit& circuit) override {
-        double conductance = 1.0 / value;
-        int idx1 = circuit.get_node_matrix_index(node1_name);
-        int idx2 = circuit.get_node_matrix_index(node2_name);
-
-        if (idx1 >= 0) G[idx1][idx1] += conductance;
-        if (idx2 >= 0) G[idx2][idx2] += conductance;
-        if (idx1 >= 0 && idx2 >= 0) {
-            G[idx1][idx2] -= conductance;
-            G[idx2][idx1] -= conductance;
+int Circuit::get_voltage_source_matrix_index(const string& vs_name) {
+    for (size_t i = 0; i < voltage_source_list.size(); ++i) {
+        if (voltage_source_list[i]->name == vs_name) {
+            return i;
         }
     }
-};
+    return -1;
+}
+
+string Resistor::to_netlist_string() const {
+    ostringstream oss;
+    oss << name << " " << node1_name << " " << node2_name << " " << fixed << setprecision(12) << value;
+    return oss.str();
+}
+
+void Resistor::stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) {
+    double conductance = 1.0 / value;
+    int idx1 = circuit.get_node_matrix_index(node1_name);
+    int idx2 = circuit.get_node_matrix_index(node2_name);
+    if (idx1 >= 0) A[idx1][idx1] += conductance;
+    if (idx2 >= 0) A[idx2][idx2] += conductance;
+    if (idx1 >= 0 && idx2 >= 0) {
+        A[idx1][idx2] -= conductance;
+        A[idx2][idx1] -= conductance;
+    }
+}
+
+string VoltageSource::to_netlist_string() const {
+    ostringstream oss;
+    oss << name << " " << node1_name << " " << node2_name << " " << fixed << setprecision(12) << value;
+    return oss.str();
+}
+
+void VoltageSource::stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) {
+    int idx1 = circuit.get_node_matrix_index(node1_name);
+    int idx2 = circuit.get_node_matrix_index(node2_name);
+    int m = circuit.node_to_idx.size() + circuit.get_voltage_source_matrix_index(this->name);
+    if (idx1 >= 0) A[m][idx1] += 1.0;
+    if (idx2 >= 0) A[m][idx2] -= 1.0;
+
+    if (idx1 >= 0) A[idx1][m] += 1.0;
+    if (idx2 >= 0) A[idx2][m] -= 1.0;
+
+    z[m] += this->value;
+}
+
+string CurrentSource::to_netlist_string() const {
+    ostringstream oss;
+    oss << name << " " << node1_name << " " << node2_name << " " << fixed << setprecision(12) << value;
+    return oss.str();
+}
+
+void CurrentSource::stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) {
+    int idx1 = circuit.get_node_matrix_index(node1_name);
+    int idx2 = circuit.get_node_matrix_index(node2_name);
+    if (idx1 >= 0) z[idx1] -= value;
+    if (idx2 >= 0) z[idx2] += value;
+}
 
 int main() {
     Circuit circuit;
     circuit.add_component(make_unique<Resistor>("R1", "1", "0", "1k"));
-    cout << "SUTSpice - Resistor implemented with stamping." << endl;
-    cout << circuit.components[0]->to_netlist_string() << endl;
+    circuit.add_component(make_unique<VoltageSource>("V1", "1", "0", "5"));
+    cout << "SUTSpice - Voltage and Current sources added." << endl;
     return 0;
 }
