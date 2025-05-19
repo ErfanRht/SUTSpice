@@ -12,7 +12,6 @@
 #include <set>
 using namespace std;
 
-// Utility Functions (to_lower_util, trim_string_util, parse_value_with_metric_prefix_util)
 inline string to_lower_util(string s) {
     transform(s.begin(), s.end(), s.begin(),
               [](unsigned char c){ return tolower(c); });
@@ -131,41 +130,10 @@ public:
 
     void add_component(unique_ptr<Component> comp);
     bool is_ground(const string& node_name) const { return node_name == ground_node_explicit_name; }
-
-    int get_node_matrix_index(const string& node_name) const {
-        if (is_ground(node_name)) return -1;
-        auto it = node_to_idx.find(node_name);
-        if (it != node_to_idx.end()) {
-            return it->second;
-        }
-        return -2; // Node not found
-    }
-
+    int get_node_matrix_index(const string& node_name) const;
     int get_voltage_source_matrix_index(const string& vs_name);
-
-    int prepare_for_analysis() {
-        node_to_idx.clear();
-        idx_to_node_name.clear();
-        voltage_source_list.clear();
-
-        set<string> unique_node_names;
-        for (const auto& comp : components) {
-            unique_node_names.insert(comp->node1_name);
-            unique_node_names.insert(comp->node2_name);
-            if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
-                voltage_source_list.push_back(vs);
-            }
-        }
-
-        int idx = 0;
-        for (const auto& name : unique_node_names) {
-            if (!is_ground(name)) {
-                node_to_idx[name] = idx++;
-                idx_to_node_name.push_back(name);
-            }
-        }
-        return idx;
-    }
+    int prepare_for_analysis();
+    void build_mna_matrix(vector<vector<double>>& A, vector<double>& z);
 };
 
 class Resistor : public Component {
@@ -196,11 +164,66 @@ void Circuit::add_component(unique_ptr<Component> comp) {
     components.push_back(move(comp));
 }
 
+int Circuit::get_node_matrix_index(const string& node_name) const {
+    if (is_ground(node_name)) return -1;
+    auto it = node_to_idx.find(node_name);
+    if (it != node_to_idx.end()) {
+        return it->second;
+    }
+    return -2; // Node not found
+}
+
 int Circuit::get_voltage_source_matrix_index(const string& vs_name) {
     for (size_t i = 0; i < voltage_source_list.size(); ++i) {
         if (voltage_source_list[i]->name == vs_name) return i;
     }
     return -1;
+}
+
+int Circuit::prepare_for_analysis() {
+    node_to_idx.clear();
+    idx_to_node_name.clear();
+    voltage_source_list.clear();
+
+    set<string> unique_node_names;
+    for (const auto& comp : components) {
+        unique_node_names.insert(comp->node1_name);
+        unique_node_names.insert(comp->node2_name);
+        if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+            voltage_source_list.push_back(vs);
+        }
+    }
+
+    int idx = 0;
+    for (const auto& name : unique_node_names) {
+        if (!is_ground(name)) {
+            node_to_idx[name] = idx++;
+            idx_to_node_name.push_back(name);
+        }
+    }
+    return idx;
+}
+
+void Circuit::build_mna_matrix(vector<vector<double>>& A, vector<double>& z) {
+    if (!components.empty() && !ground_node_exists) {
+        throw runtime_error("No ground node defined.");
+    }
+    int N = prepare_for_analysis();
+    int M = voltage_source_list.size();
+    int system_size = N + M;
+
+    if (system_size == 0) {
+        A.clear();
+        z.clear();
+        return;
+    }
+
+    A.assign(system_size, vector<double>(system_size, 0.0));
+    z.assign(system_size, 0.0);
+
+    for (const auto& comp : components) {
+        comp->stamp(A, z, *this);
+    }
 }
 
 string Resistor::to_netlist_string() const {
@@ -250,12 +273,27 @@ void CurrentSource::stamp(vector<vector<double>>& A, vector<double>& z, Circuit&
 }
 
 int main() {
-    cout << "SUTSpice - MNA preparation implemented." << endl;
+    cout << "SUTSpice - MNA matrix building implemented." << endl;
     Circuit c;
     c.add_component(make_unique<VoltageSource>("V1", "1", "0", "10"));
-    c.add_component(make_unique<Resistor>("R1", "1", "0", "1k"));
-    c.prepare_for_analysis();
-    cout << "Node '1' is mapped to index: " << c.get_node_matrix_index("1") << endl;
-    cout << "Ground node '0' index is: " << c.get_node_matrix_index("0") << endl;
+    c.add_component(make_unique<Resistor>("R1", "1", "2", "2k"));
+    c.add_component(make_unique<Resistor>("R2", "2", "0", "3k"));
+
+    vector<vector<double>> A;
+    vector<double> z;
+    c.build_mna_matrix(A, z);
+
+    cout << "System size: " << A.size() << endl;
+    cout << "Matrix A:" << endl;
+    for(const auto& row : A) {
+        for(const auto& val : row) {
+            cout << setw(8) << val << " ";
+        }
+        cout << endl;
+    }
+    cout << "Vector z:" << endl;
+    for(const auto& val : z) {
+        cout << val << endl;
+    }
     return 0;
 }
