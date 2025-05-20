@@ -161,6 +161,9 @@ public:
 };
 
 void Circuit::add_component(unique_ptr<Component> comp) {
+    if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
+        voltage_source_list.push_back(vs);
+    }
     components.push_back(move(comp));
 }
 
@@ -170,7 +173,7 @@ int Circuit::get_node_matrix_index(const string& node_name) const {
     if (it != node_to_idx.end()) {
         return it->second;
     }
-    return -2; // Node not found
+    return -2;
 }
 
 int Circuit::get_voltage_source_matrix_index(const string& vs_name) {
@@ -184,7 +187,6 @@ int Circuit::prepare_for_analysis() {
     node_to_idx.clear();
     idx_to_node_name.clear();
     voltage_source_list.clear();
-
     set<string> unique_node_names;
     for (const auto& comp : components) {
         unique_node_names.insert(comp->node1_name);
@@ -193,7 +195,6 @@ int Circuit::prepare_for_analysis() {
             voltage_source_list.push_back(vs);
         }
     }
-
     int idx = 0;
     for (const auto& name : unique_node_names) {
         if (!is_ground(name)) {
@@ -272,28 +273,59 @@ void CurrentSource::stamp(vector<vector<double>>& A, vector<double>& z, Circuit&
     if (idx2 >= 0) z[idx2] += value;
 }
 
-int main() {
-    cout << "SUTSpice - MNA matrix building implemented." << endl;
-    Circuit c;
-    c.add_component(make_unique<VoltageSource>("V1", "1", "0", "10"));
-    c.add_component(make_unique<Resistor>("R1", "1", "2", "2k"));
-    c.add_component(make_unique<Resistor>("R2", "2", "0", "3k"));
+struct Command {
+    string type;
+    vector<string> args;
+};
 
-    vector<vector<double>> A;
-    vector<double> z;
-    c.build_mna_matrix(A, z);
-
-    cout << "System size: " << A.size() << endl;
-    cout << "Matrix A:" << endl;
-    for(const auto& row : A) {
-        for(const auto& val : row) {
-            cout << setw(8) << val << " ";
+class Parser {
+public:
+    Command parse_line(const string& line) {
+        stringstream ss(trim_string_util(line));
+        string segment;
+        Command cmd;
+        bool first = true;
+        while (ss >> segment) {
+            if (first) {
+                cmd.type = to_lower_util(segment);
+                first = false;
+            } else {
+                cmd.args.push_back(segment);
+            }
         }
-        cout << endl;
+        return cmd;
     }
-    cout << "Vector z:" << endl;
-    for(const auto& val : z) {
-        cout << val << endl;
+
+    void execute_command(const Command& cmd, Circuit& circuit) {
+        try {
+            if (cmd.type == "exit" || cmd.type == "quit") {
+                cout << "Exiting simulator." << endl;
+                exit(0);
+            } else {
+                cout << "Command '" << cmd.type << "' not yet implemented." << endl;
+            }
+        } catch (const exception& e) {
+            cerr << "Error: " << e.what() << endl;
+        }
     }
+};
+
+int main() {
+    Circuit circuit_main;
+    Parser parser_main;
+    string line_input;
+
+    cout << "Welcome to SUTSpice!" << endl;
+    while (true) {
+        cout << "> ";
+        if (!getline(cin, line_input)) break;
+
+        line_input = trim_string_util(line_input);
+        if (line_input.empty()) continue;
+
+        Command cmd = parser_main.parse_line(line_input);
+        parser_main.execute_command(cmd, circuit_main);
+    }
+
     return 0;
 }
