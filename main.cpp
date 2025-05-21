@@ -134,6 +134,7 @@ public:
     int get_voltage_source_matrix_index(const string& vs_name);
     int prepare_for_analysis();
     void build_mna_matrix(vector<vector<double>>& A, vector<double>& z);
+    void clear();
 };
 
 class Resistor : public Component {
@@ -159,6 +160,15 @@ public:
     string to_netlist_string() const override;
     void stamp(vector<vector<double>>& A, vector<double>& z, Circuit& circuit) override;
 };
+
+void Circuit::clear() {
+    components.clear();
+    node_to_idx.clear();
+    idx_to_node_name.clear();
+    voltage_source_list.clear();
+    ground_node_exists = true; // Reset to default
+    ground_node_explicit_name = "0";
+}
 
 void Circuit::add_component(unique_ptr<Component> comp) {
     if (auto vs = dynamic_cast<VoltageSource*>(comp.get())) {
@@ -280,42 +290,110 @@ struct Command {
 
 class Parser {
 public:
-    Command parse_line(const string& line) {
-        stringstream ss(trim_string_util(line));
-        string segment;
-        Command cmd;
-        bool first = true;
-        while (ss >> segment) {
-            if (first) {
-                cmd.type = to_lower_util(segment);
-                first = false;
-            } else {
-                cmd.args.push_back(segment);
-            }
-        }
-        return cmd;
-    }
-
-    void execute_command(const Command& cmd, Circuit& circuit) {
-        try {
-            if (cmd.type == "exit" || cmd.type == "quit") {
-                cout << "Exiting simulator." << endl;
-                exit(0);
-            } else {
-                cout << "Command '" << cmd.type << "' not yet implemented." << endl;
-            }
-        } catch (const exception& e) {
-            cerr << "Error: " << e.what() << endl;
-        }
-    }
+    Command parse_line(const string& line);
+    void execute_command(Command& cmd, Circuit& circuit);
+private:
+    void handle_add_component(const vector<string>& args, Circuit& circuit);
+    void handle_list_components(const Circuit& circuit);
+    void handle_list_nodes(const Circuit& circuit);
 };
+
+Command Parser::parse_line(const string& line) {
+    stringstream ss(trim_string_util(line));
+    string segment;
+    Command cmd;
+    bool first = true;
+    while (ss >> segment) {
+        if (first) {
+            cmd.type = segment;
+            first = false;
+        } else {
+            cmd.args.push_back(segment);
+        }
+    }
+    return cmd;
+}
+
+void Parser::execute_command(Command& cmd, Circuit& circuit) {
+    try {
+        string cmd_type_lower = to_lower_util(cmd.type);
+        if (cmd_type_lower == "exit" || cmd_type_lower == "quit") {
+            cout << "Exiting simulator." << endl;
+            exit(0);
+        } else if (cmd_type_lower == ".list") {
+            handle_list_components(circuit);
+        } else if (cmd_type_lower == ".nodes") {
+            handle_list_nodes(circuit);
+        } else if (cmd_type_lower == ".clear") {
+            circuit.clear();
+            cout << "Circuit cleared." << endl;
+        } else {
+            cmd.args.insert(cmd.args.begin(), cmd.type);
+            handle_add_component(cmd.args, circuit);
+        }
+    } catch (const exception& e) {
+        cerr << "Error: " << e.what() << endl;
+    }
+}
+
+void Parser::handle_add_component(const vector<string>& args, Circuit& circuit) {
+    if (args.size() < 4) throw runtime_error("Insufficient arguments for adding a component. Usage: <name> <node1> <node2> <value>");
+
+    string name = args[0];
+    char type_char = toupper(name[0]);
+    string n1 = args[1];
+    string n2 = args[2];
+    string val_str = args[3];
+
+    switch(type_char) {
+        case 'R':
+            circuit.add_component(make_unique<Resistor>(name, n1, n2, val_str));
+            break;
+        case 'V':
+            circuit.add_component(make_unique<VoltageSource>(name, n1, n2, val_str));
+            break;
+        case 'I':
+            circuit.add_component(make_unique<CurrentSource>(name, n1, n2, val_str));
+            break;
+        default:
+            throw runtime_error("Unknown component type: " + string(1, type_char));
+    }
+    cout << "Added component " << name << endl;
+}
+
+void Parser::handle_list_components(const Circuit& circuit) {
+    cout << "Components in circuit:" << endl;
+    if (circuit.components.empty()) {
+        cout << "  (No components)" << endl;
+        return;
+    }
+    for (const auto& comp : circuit.components) {
+        cout << "  - " << comp->to_netlist_string() << endl;
+    }
+}
+
+void Parser::handle_list_nodes(const Circuit& circuit) {
+    set<string> all_nodes;
+    for (const auto& comp : circuit.components) {
+        all_nodes.insert(comp->node1_name);
+        all_nodes.insert(comp->node2_name);
+    }
+    cout << "Available nodes:" << endl;
+    if (all_nodes.empty()) {
+        cout << "  (No nodes in circuit)" << endl;
+        return;
+    }
+    for (const auto& node_name : all_nodes) {
+        cout << "  " << node_name << (circuit.is_ground(node_name) ? " (Ground)" : "") << endl;
+    }
+}
 
 int main() {
     Circuit circuit_main;
     Parser parser_main;
     string line_input;
 
-    cout << "Welcome to SUTSpice!" << endl;
+    cout << "Welcome to SUTSpice! Enter commands." << endl;
     while (true) {
         cout << "> ";
         if (!getline(cin, line_input)) break;
