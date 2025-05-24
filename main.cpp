@@ -93,6 +93,8 @@ public:
     virtual string to_netlist_string() const = 0;
 };
 
+using ResultPoint = map < string, double > ;
+
 class VoltageSource;
 class Inductor;
 
@@ -105,12 +107,15 @@ public:
     vector<Inductor*> inductor_list;
     string ground_node_explicit_name = "0";
     bool ground_node_exists = true;
+    bool tran_solved = false;
+    vector<ResultPoint> tran_results;
 
     void add_component(unique_ptr<Component> comp);
     bool is_ground(const string& node_name) const { return node_name == ground_node_explicit_name; }
     int get_node_matrix_index(const string& node_name) const;
     int prepare_for_analysis();
     void build_mna_matrix(vector<vector<double>>& A, vector<double>& z, double h, const vector<double>& prev_sol);
+    void perform_transient_analysis(double t_step, double t_stop);
     void clear();
 };
 
@@ -153,10 +158,12 @@ void Circuit::clear() {
     components.clear(); node_to_idx.clear(); idx_to_node_name.clear();
     voltage_source_list.clear(); inductor_list.clear();
     ground_node_exists = true; ground_node_explicit_name = "0";
+    tran_solved = false; tran_results.clear();
 }
 
 void Circuit::add_component(unique_ptr<Component> comp) {
     components.push_back(move(comp));
+    tran_solved = false;
 }
 
 int Circuit::get_node_matrix_index(const string& node_name) const {
@@ -212,6 +219,44 @@ void Circuit::build_mna_matrix(vector<vector<double>>& A, vector<double>& z, dou
     for (int i = 0; i < M; ++i) for (int j = 0; j < M; ++j) A[N + i][N + j] = D[i][j];
     for (int i = 0; i < N; ++i) z[i] = J[i];
     for (int i = 0; i < M; ++i) z[N + i] = E[i];
+}
+
+void Circuit::perform_transient_analysis(double t_step, double t_stop) {
+    tran_solved = false;
+    tran_results.clear();
+    if (t_step <= 0 || t_stop <= 0 || t_step > t_stop) throw runtime_error("Invalid transient parameters.");
+
+    int N = prepare_for_analysis();
+    int M = voltage_source_list.size() + inductor_list.size();
+    if (N + M == 0) {
+        tran_solved = true;
+        return;
+    }
+
+    vector<double> prev_solution(N + M, 0.0);
+
+    for (double t = 0; t <= t_stop + (t_step / 2.0); t += t_step) {
+        vector<vector<double>> A;
+        vector<double> z;
+        build_mna_matrix(A, z, t_step, prev_solution);
+
+        vector<double> current_solution = gaussian_elimination_matrix(A, z);
+
+        ResultPoint result_at_t;
+        result_at_t["time"] = t;
+        for (int i = 0; i < N; ++i) result_at_t["V(" + idx_to_node_name[i] + ")"] = current_solution[i];
+
+        map<string, int> m_map;
+        int m_counter = 0;
+        for (const auto& vs : voltage_source_list) m_map[vs->name] = m_counter++;
+        for (const auto& l : inductor_list) m_map[l->name] = m_counter++;
+        for (const auto& p : m_map) result_at_t["I(" + p.first + ")"] = current_solution[N + p.second];
+
+        tran_results.push_back(result_at_t);
+        prev_solution = current_solution;
+    }
+    tran_solved = true;
+    cout << "Transient analysis completed." << endl;
 }
 
 string Resistor::to_netlist_string() const { ostringstream oss; oss << name << " " << node1_name << " " << node2_name << " " << value; return oss.str(); }
