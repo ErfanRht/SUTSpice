@@ -121,12 +121,6 @@ public: string name;
                                                                         node1_name(move(n1)),
                                                                         node2_name(move(n2)),
                                                                         value(val) {}
-    Component(string name_val, string n1, string n2,
-              const string & val_str): name(move(name_val)),
-                                       node1_name(move(n1)),
-                                       node2_name(move(n2)) {
-        this -> value = parse_value_with_metric_prefix_util(val_str);
-    }
     virtual~Component() =
     default;
     virtual void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m_map, double h,
@@ -139,6 +133,8 @@ using ResultPoint = map < string, double > ;
 
 class VoltageSource;
 class Inductor;
+class Resistor;
+class Capacitor;
 
 class Circuit {
 public: vector < unique_ptr < Component >> components;
@@ -162,13 +158,17 @@ public: vector < unique_ptr < Component >> components;
                           const vector < double > & prev_sol);
     void perform_transient_analysis(double t_step, double t_stop);
     void clear();
+    double get_voltage_at(const string & node_name,
+                          const ResultPoint & results) const;
+    void calculate_and_store_passive_currents(ResultPoint & result_point,
+                                              const ResultPoint & prev_result_point, double h);
 };
 
 class Resistor: public Component {
 public: Resistor(const string & name,
                  const string & n1,
                  const string & n2,
-                 const string & val): Component(name, n1, n2, val) {}
+                 const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -178,7 +178,7 @@ class Capacitor: public Component {
 public: Capacitor(const string & name,
                   const string & n1,
                   const string & n2,
-                  const string & val): Component(name, n1, n2, val) {}
+                  const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -188,7 +188,7 @@ class Inductor: public Component {
 public: Inductor(const string & name,
                  const string & n1,
                  const string & n2,
-                 const string & val): Component(name, n1, n2, val) {}
+                 const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -227,7 +227,7 @@ class CurrentSource: public Component {
 public: CurrentSource(const string & name,
                       const string & n1,
                       const string & n2,
-                      const string & val): Component(name, n1, n2, val) {}
+                      const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -316,6 +316,35 @@ void Circuit::build_mna_matrix(vector < vector < double >> & A, vector < double 
     for (int i = 0; i < M; ++i) z[N + i] = E[i];
 }
 
+double Circuit::get_voltage_at(const string & node_name,
+                               const ResultPoint & results) const {
+    if (is_ground(node_name)) return 0.0;
+    string v_name = "V(" + node_name + ")";
+    auto it = results.find(v_name);
+    if (it != results.end()) return it -> second;
+    return 0.0;
+}
+
+void Circuit::calculate_and_store_passive_currents(ResultPoint & result_point,
+                                                   const ResultPoint & prev_result_point, double h) {
+    for (const auto & comp: components) {
+        double v1 = get_voltage_at(comp -> node1_name, result_point);
+        double v2 = get_voltage_at(comp -> node2_name, result_point);
+
+        if (auto r = dynamic_cast < Resistor * > (comp.get())) {
+            result_point["I(" + r -> name + ")"] = (v1 - v2) / r -> value;
+        } else if (auto c = dynamic_cast < Capacitor * > (comp.get())) {
+            if (h > 0 && !prev_result_point.empty()) {
+                double v1_prev = get_voltage_at(c -> node1_name, prev_result_point);
+                double v2_prev = get_voltage_at(c -> node2_name, prev_result_point);
+                result_point["I(" + c -> name + ")"] = c -> value * ((v1 - v2) - (v1_prev - v2_prev)) / h;
+            } else {
+                result_point["I(" + c -> name + ")"] = 0.0;
+            }
+        }
+    }
+}
+
 void Circuit::perform_transient_analysis(double t_step, double t_stop) {
     tran_solved = false;
     tran_results.clear();
@@ -329,6 +358,7 @@ void Circuit::perform_transient_analysis(double t_step, double t_stop) {
     }
 
     vector < double > prev_solution(N + M, 0.0);
+    ResultPoint prev_result_point;
 
     for (double t = 0; t <= t_stop + (t_step / 2.0); t += t_step) {
         for (auto & comp: components) {
@@ -350,8 +380,11 @@ void Circuit::perform_transient_analysis(double t_step, double t_stop) {
         for (const auto & l: inductor_list) m_map[l -> name] = m_counter++;
         for (const auto & p: m_map) result_at_t["I(" + p.first + ")"] = current_solution[N + p.second];
 
+        calculate_and_store_passive_currents(result_at_t, prev_result_point, t_step);
+
         tran_results.push_back(result_at_t);
         prev_solution = current_solution;
+        prev_result_point = result_at_t;
     }
     tran_solved = true;
     cout << "Transient analysis completed." << endl;
@@ -429,7 +462,7 @@ void Inductor::stamp(Circuit & c, vector < vector < double >> & G, vector < vect
 VoltageSource::VoltageSource(const string & v_name,
                              const string & n1,
                              const string & n2,
-                             const vector < string > & params): Component(v_name, n1, n2, "0"), sourceType(DC), dc_offset(0), amplitude(0), frequency(0), v1(0), v2(0), td(0), tr(0), tf(0), pw(0), per(0), raw_params(params) {
+                             const vector < string > & params): Component(v_name, n1, n2, 0.0), sourceType(DC), dc_offset(0), amplitude(0), frequency(0), v1(0), v2(0), td(0), tr(0), tf(0), pw(0), per(0), raw_params(params) {
     if (params.empty()) throw runtime_error("No value/params for voltage source " + name);
     string first_param_upper = to_lower_util(params[0]);
     if (first_param_upper.rfind("sin", 0) == 0) {
@@ -540,6 +573,7 @@ public: Command parse_line(const string & line);
 private: void handle_add_component(const vector < string > & args, Circuit & circuit);
     void handle_list_components(const Circuit & circuit);
     void handle_list_nodes(const Circuit & circuit);
+    void handle_print(const vector < string > & args, Circuit & circuit);
 };
 
 Command Parser::parse_line(const string & line) {
@@ -571,6 +605,8 @@ void Parser::execute_command(Command & cmd, Circuit & circuit) {
         } else if (cmd_type_lower == ".clear") {
             circuit.clear();
             cout << "Circuit cleared." << endl;
+        } else if (cmd_type_lower == ".print") {
+            handle_print(cmd.args, circuit);
         } else {
             cmd.args.insert(cmd.args.begin(), cmd.type);
             handle_add_component(cmd.args, circuit);
@@ -581,13 +617,12 @@ void Parser::execute_command(Command & cmd, Circuit & circuit) {
 }
 
 void Parser::handle_add_component(const vector < string > & args, Circuit & circuit) {
-    if (args.size() < 4) throw runtime_error("Insufficient arguments. Usage: <name> <node1> <node2> <value> [params...]");
+    if (args.size() < 4) throw runtime_error("Insufficient arguments for component.");
     string name = args[0];
     char type_char = toupper(name[0]);
     string n1 = args[1];
     string n2 = args[2];
     vector < string > remaining_args(args.begin() + 3, args.end());
-
     switch (type_char) {
         case 'R':
             circuit.add_component(make_unique < Resistor > (name, n1, n2, remaining_args[0]));
@@ -620,6 +655,7 @@ void Parser::handle_list_components(const Circuit & circuit) {
         cout << "  - " << comp -> to_netlist_string() << endl;
     }
 }
+
 void Parser::handle_list_nodes(const Circuit & circuit) {
     set < string > all_nodes;
     for (const auto & comp: circuit.components) {
@@ -633,6 +669,42 @@ void Parser::handle_list_nodes(const Circuit & circuit) {
     }
     for (const auto & node_name: all_nodes) {
         cout << "  " << node_name << (circuit.is_ground(node_name) ? " (Ground)" : "") << endl;
+    }
+}
+
+void Parser::handle_print(const vector < string > & args, Circuit & circuit) {
+    if (args.empty()) throw runtime_error("Syntax error. Expected: .print <analysis_type> ...");
+    string analysis_type = to_lower_util(args[0]);
+
+    if (analysis_type == "tran") {
+        if (args.size() < 4) throw runtime_error("Syntax error. Expected: .print tran <Tstep> <Tstop> <vars...>");
+        double t_step = parse_value_with_metric_prefix_util(args[1]);
+        double t_stop = parse_value_with_metric_prefix_util(args[2]);
+        vector < string > vars_to_print(args.begin() + 3, args.end());
+
+        circuit.perform_transient_analysis(t_step, t_stop);
+        if (!circuit.tran_solved) return;
+
+        cout << left << setw(15) << "time";
+        for (const auto &
+                    var: vars_to_print) cout << setw(15) <<
+                                             var;
+        cout << endl;
+
+        for (const auto & result_point: circuit.tran_results) {
+            cout << fixed << setprecision(6) << setw(15) << result_point.at("time");
+            for (const auto &
+                        var: vars_to_print) {
+                try {
+                    cout << setw(15) << result_point.at(var);
+                } catch (const out_of_range & ) {
+                    cout << setw(15) << "N/A";
+                }
+            }
+            cout << endl;
+        }
+    } else {
+        throw runtime_error("Unsupported analysis type '" + analysis_type + "'.");
     }
 }
 
