@@ -24,6 +24,7 @@
 
 using namespace std;
 
+// UTILITY FUNCTIONS
 inline string to_lower_util(string s) {
     transform(s.begin(), s.end(), s.begin(),
               [](unsigned char c) {
@@ -80,6 +81,7 @@ double parse_value_with_metric_prefix_util(const string & val_str_orig) {
     return base_val * multiplier;
 }
 
+// GAUSSIAN ELIMINATION
 vector < double > gaussian_elimination_matrix(vector < vector < double >> A, vector < double > b) {
     int n = A.size();
     if (n == 0 || (n > 0 && (A[0].size() != n || b.size() != n))) throw runtime_error("Invalid matrix or vector dimensions for Gaussian elimination.");
@@ -135,6 +137,7 @@ class VoltageSource;
 class Inductor;
 class Resistor;
 class Capacitor;
+class VCVS;
 
 class Circuit {
 public: vector < unique_ptr < Component >> components;
@@ -143,6 +146,7 @@ public: vector < unique_ptr < Component >> components;
     vector < string > idx_to_node_name;
     vector < VoltageSource * > voltage_source_list;
     vector < Inductor * > inductor_list;
+    vector < VCVS * > vcvs_list;
     string ground_node_explicit_name = "0";
     bool ground_node_exists = true;
     bool tran_solved = false;
@@ -233,12 +237,45 @@ public: CurrentSource(const string & name,
                const vector < double > & p) override;
 };
 
+class VCVS: public Component {
+public: string ctrl_node1,
+            ctrl_node2;
+    VCVS(const string & name,
+         const string & n1,
+         const string & n2,
+         const string & cn1,
+         const string & cn2,
+         const string & gain_str): Component(name, n1, n2, parse_value_with_metric_prefix_util(gain_str)),
+                                   ctrl_node1(cn1),
+                                   ctrl_node2(cn2) {}
+    string to_netlist_string() const override;
+    void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
+               const vector < double > & p) override;
+};
+
+class VCCS: public Component {
+public: string ctrl_node1,
+            ctrl_node2;
+    VCCS(const string & name,
+         const string & n1,
+         const string & n2,
+         const string & cn1,
+         const string & cn2,
+         const string & gain_str): Component(name, n1, n2, parse_value_with_metric_prefix_util(gain_str)),
+                                   ctrl_node1(cn1),
+                                   ctrl_node2(cn2) {}
+    string to_netlist_string() const override;
+    void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
+               const vector < double > & p) override;
+};
+
 void Circuit::clear() {
     components.clear();
     node_to_idx.clear();
     idx_to_node_name.clear();
     voltage_source_list.clear();
     inductor_list.clear();
+    vcvs_list.clear();
     ground_node_exists = true;
     ground_node_explicit_name = "0";
     tran_solved = false;
@@ -261,12 +298,14 @@ int Circuit::prepare_for_analysis() {
     idx_to_node_name.clear();
     voltage_source_list.clear();
     inductor_list.clear();
+    vcvs_list.clear();
     set < string > unique_node_names;
     for (const auto & comp: components) {
         unique_node_names.insert(comp -> node1_name);
         unique_node_names.insert(comp -> node2_name);
         if (auto vs = dynamic_cast < VoltageSource * > (comp.get())) voltage_source_list.push_back(vs);
         else if (auto ind = dynamic_cast < Inductor * > (comp.get())) inductor_list.push_back(ind);
+        else if (auto vcvs = dynamic_cast < VCVS * > (comp.get())) vcvs_list.push_back(vcvs);
     }
     int idx = 0;
     for (const auto & name: unique_node_names) {
@@ -282,7 +321,7 @@ void Circuit::build_mna_matrix(vector < vector < double >> & A, vector < double 
                                const vector < double > & prev_sol) {
     if (!components.empty() && !ground_node_exists) throw runtime_error("No ground node defined.");
     int N = prepare_for_analysis();
-    int M = voltage_source_list.size() + inductor_list.size();
+    int M = voltage_source_list.size() + inductor_list.size() + vcvs_list.size();
     int system_size = N + M;
     if (system_size == 0) {
         A.clear();
@@ -297,6 +336,7 @@ void Circuit::build_mna_matrix(vector < vector < double >> & A, vector < double 
     int m_counter = 0;
     for (const auto & vs: voltage_source_list) m_map[vs -> name] = m_counter++;
     for (const auto & l: inductor_list) m_map[l -> name] = m_counter++;
+    for (const auto & vcvs: vcvs_list) m_map[vcvs -> name] = m_counter++;
 
     for (const auto & comp: components) {
         comp -> stamp( * this, G, B, C, D, J, E, m_map, h, prev_sol);
@@ -351,7 +391,7 @@ void Circuit::perform_transient_analysis(double t_step, double t_stop) {
     if (t_step <= 0 || t_stop <= 0 || t_step > t_stop) throw runtime_error("Invalid transient parameters.");
 
     int N = prepare_for_analysis();
-    int M = voltage_source_list.size() + inductor_list.size();
+    int M = voltage_source_list.size() + inductor_list.size() + vcvs_list.size();
     if (N + M == 0) {
         tran_solved = true;
         return;
@@ -378,6 +418,7 @@ void Circuit::perform_transient_analysis(double t_step, double t_stop) {
         int m_counter = 0;
         for (const auto & vs: voltage_source_list) m_map[vs -> name] = m_counter++;
         for (const auto & l: inductor_list) m_map[l -> name] = m_counter++;
+        for (const auto & vcvs: vcvs_list) m_map[vcvs -> name] = m_counter++;
         for (const auto & p: m_map) result_at_t["I(" + p.first + ")"] = current_solution[N + p.second];
 
         calculate_and_store_passive_currents(result_at_t, prev_result_point, t_step);
@@ -455,7 +496,7 @@ void Inductor::stamp(Circuit & c, vector < vector < double >> & G, vector < vect
     D[m_idx][m_idx] -= (h > 0 ? value / h : 1e-12);
     if (h > 0 && !p.empty()) {
         int N = c.idx_to_node_name.size();
-        E[m_idx] -= (value / h) * p[N + m_idx];
+        if (N + m_idx < p.size()) E[m_idx] -= (value / h) * p[N + m_idx];
     }
 }
 
@@ -562,6 +603,47 @@ void CurrentSource::stamp(Circuit & c, vector < vector < double >> & G, vector <
     if (i2 >= 0) J[i2] += value;
 }
 
+string VCVS::to_netlist_string() const {
+    ostringstream oss;
+    oss << name << " " << node1_name << " " << node2_name << " " << ctrl_node1 << " " << ctrl_node2 << " " << value;
+    return oss.str();
+}
+void VCVS::stamp(Circuit & c, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
+                 const vector < double > & p) {
+    int m_idx = m.at(name);
+    int n1_idx = c.get_node_matrix_index(node1_name);
+    int n2_idx = c.get_node_matrix_index(node2_name);
+    int cn1_idx = c.get_node_matrix_index(ctrl_node1);
+    int cn2_idx = c.get_node_matrix_index(ctrl_node2);
+    if (n1_idx >= 0) {
+        B[n1_idx][m_idx] = 1.0;
+        C[m_idx][n1_idx] = 1.0;
+    }
+    if (n2_idx >= 0) {
+        B[n2_idx][m_idx] = -1.0;
+        C[m_idx][n2_idx] = -1.0;
+    }
+    if (cn1_idx >= 0) C[m_idx][cn1_idx] -= value;
+    if (cn2_idx >= 0) C[m_idx][cn2_idx] += value;
+}
+
+string VCCS::to_netlist_string() const {
+    ostringstream oss;
+    oss << name << " " << node1_name << " " << node2_name << " " << ctrl_node1 << " " << ctrl_node2 << " " << value;
+    return oss.str();
+}
+void VCCS::stamp(Circuit & c, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
+                 const vector < double > & p) {
+    int n1_idx = c.get_node_matrix_index(node1_name);
+    int n2_idx = c.get_node_matrix_index(node2_name);
+    int cn1_idx = c.get_node_matrix_index(ctrl_node1);
+    int cn2_idx = c.get_node_matrix_index(ctrl_node2);
+    if (n1_idx >= 0 && cn1_idx >= 0) G[n1_idx][cn1_idx] += value;
+    if (n1_idx >= 0 && cn2_idx >= 0) G[n1_idx][cn2_idx] -= value;
+    if (n2_idx >= 0 && cn1_idx >= 0) G[n2_idx][cn1_idx] -= value;
+    if (n2_idx >= 0 && cn2_idx >= 0) G[n2_idx][cn2_idx] += value;
+}
+
 struct Command {
     string type;
     vector < string > args;
@@ -617,28 +699,39 @@ void Parser::execute_command(Command & cmd, Circuit & circuit) {
 }
 
 void Parser::handle_add_component(const vector < string > & args, Circuit & circuit) {
-    if (args.size() < 4) throw runtime_error("Insufficient arguments for component.");
-    string name = args[0];
-    char type_char = toupper(name[0]);
-    string n1 = args[1];
-    string n2 = args[2];
-    vector < string > remaining_args(args.begin() + 3, args.end());
+    if (args.empty()) throw runtime_error("No component specified.");
+    char type_char = toupper(args[0][0]);
+    const string & name = args[0];
+    const string & n1 = args[1];
+    const string & n2 = args[2];
+
     switch (type_char) {
         case 'R':
-            circuit.add_component(make_unique < Resistor > (name, n1, n2, remaining_args[0]));
+        case 'I':
+        case 'C':
+        case 'L':
+            if (args.size() != 4) throw runtime_error("Incorrect argument count for R, I, C, or L.");
+            if (type_char == 'R') circuit.add_component(make_unique < Resistor > (name, n1, n2, args[3]));
+            else if (type_char == 'I') circuit.add_component(make_unique < CurrentSource > (name, n1, n2, args[3]));
+            else if (type_char == 'C') circuit.add_component(make_unique < Capacitor > (name, n1, n2, args[3]));
+            else if (type_char == 'L') circuit.add_component(make_unique < Inductor > (name, n1, n2, args[3]));
             break;
-        case 'V':
+        case 'V': {
+            if (args.size() < 4) throw runtime_error("Insufficient arguments for V source.");
+            vector < string > remaining_args(args.begin() + 3, args.end());
             circuit.add_component(make_unique < VoltageSource > (name, n1, n2, remaining_args));
             break;
-        case 'I':
-            circuit.add_component(make_unique < CurrentSource > (name, n1, n2, remaining_args[0]));
+        }
+        case 'E': { // VCVS
+            if (args.size() != 6) throw runtime_error("Incorrect argument count for VCVS (E).");
+            circuit.add_component(make_unique < VCVS > (name, n1, n2, args[3], args[4], args[5]));
             break;
-        case 'C':
-            circuit.add_component(make_unique < Capacitor > (name, n1, n2, remaining_args[0]));
+        }
+        case 'G': { // VCCS
+            if (args.size() != 6) throw runtime_error("Incorrect argument count for VCCS (G).");
+            circuit.add_component(make_unique < VCCS > (name, n1, n2, args[3], args[4], args[5]));
             break;
-        case 'L':
-            circuit.add_component(make_unique < Inductor > (name, n1, n2, remaining_args[0]));
-            break;
+        }
         default:
             throw runtime_error("Unknown component type: " + string(1, type_char));
     }
@@ -655,7 +748,6 @@ void Parser::handle_list_components(const Circuit & circuit) {
         cout << "  - " << comp -> to_netlist_string() << endl;
     }
 }
-
 void Parser::handle_list_nodes(const Circuit & circuit) {
     set < string > all_nodes;
     for (const auto & comp: circuit.components) {
