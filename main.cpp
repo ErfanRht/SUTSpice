@@ -120,6 +120,19 @@ vector < double > gaussian_elimination_matrix(vector < vector < double >> A, vec
 
 class Circuit;
 
+enum class ComponentType {
+    Resistor,
+    Capacitor,
+    Inductor,
+    VoltageSource,
+    CurrentSource,
+    VCVS,
+    VCCS,
+    CCVS,
+    CCCS,
+    Diode
+};
+
 class Component {
 public: string name;
     string node1_name,
@@ -131,6 +144,7 @@ public: string name;
                                                                         value(val) {}
     virtual~Component() =
     default;
+    virtual ComponentType get_type() const = 0;
     virtual void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m_map, double h,
                        const vector < double > & prev_sol) = 0;
     virtual string to_netlist_string() const = 0;
@@ -146,6 +160,7 @@ class Resistor;
 class Capacitor;
 class VCVS;
 class CCVS;
+class Diode;
 
 class Circuit {
 public: vector < unique_ptr < Component >> components;
@@ -156,6 +171,7 @@ public: vector < unique_ptr < Component >> components;
     vector < Inductor * > inductor_list;
     vector < VCVS * > vcvs_list;
     vector < CCVS * > ccvs_list;
+    vector < Diode * > diode_list;
     string ground_node_explicit_name = GROUND_NODE_NAME_CONST;
     bool ground_node_exists = false;
     bool tran_solved = false;
@@ -191,7 +207,10 @@ class Resistor: public Component {
 public: Resistor(const string & name,
                  const string & n1,
                  const string & n2,
-                 const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
+                 const string & val);
+    ComponentType get_type() const override {
+        return ComponentType::Resistor;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -201,7 +220,10 @@ class Capacitor: public Component {
 public: Capacitor(const string & name,
                   const string & n1,
                   const string & n2,
-                  const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
+                  const string & val);
+    ComponentType get_type() const override {
+        return ComponentType::Capacitor;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -211,7 +233,10 @@ class Inductor: public Component {
 public: Inductor(const string & name,
                  const string & n1,
                  const string & n2,
-                 const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
+                 const string & val);
+    ComponentType get_type() const override {
+        return ComponentType::Inductor;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -240,6 +265,9 @@ public: enum SourceType {
                   const string & n1,
                   const string & n2,
                   const vector < string > & params);
+    ComponentType get_type() const override {
+        return ComponentType::VoltageSource;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -250,7 +278,10 @@ class CurrentSource: public Component {
 public: CurrentSource(const string & name,
                       const string & n1,
                       const string & n2,
-                      const string & val): Component(name, n1, n2, parse_value_with_metric_prefix_util(val)) {}
+                      const string & val);
+    ComponentType get_type() const override {
+        return ComponentType::CurrentSource;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -264,9 +295,10 @@ public: string ctrl_node1,
          const string & n2,
          const string & cn1,
          const string & cn2,
-         const string & gain_str): Component(name, n1, n2, parse_value_with_metric_prefix_util(gain_str)),
-                                   ctrl_node1(cn1),
-                                   ctrl_node2(cn2) {}
+         const string & gain_str);
+    ComponentType get_type() const override {
+        return ComponentType::VCVS;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -280,9 +312,10 @@ public: string ctrl_node1,
          const string & n2,
          const string & cn1,
          const string & cn2,
-         const string & gain_str): Component(name, n1, n2, parse_value_with_metric_prefix_util(gain_str)),
-                                   ctrl_node1(cn1),
-                                   ctrl_node2(cn2) {}
+         const string & gain_str);
+    ComponentType get_type() const override {
+        return ComponentType::VCCS;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -294,8 +327,10 @@ public: string ctrl_v_name;
          const string & n1,
          const string & n2,
          const string & cvn,
-         const string & gain_str): Component(name, n1, n2, parse_value_with_metric_prefix_util(gain_str)),
-                                   ctrl_v_name(cvn) {}
+         const string & gain_str);
+    ComponentType get_type() const override {
+        return ComponentType::CCVS;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -307,8 +342,26 @@ public: string ctrl_v_name;
          const string & n1,
          const string & n2,
          const string & cvn,
-         const string & gain_str): Component(name, n1, n2, parse_value_with_metric_prefix_util(gain_str)),
-                                   ctrl_v_name(cvn) {}
+         const string & gain_str);
+    ComponentType get_type() const override {
+        return ComponentType::CCCS;
+    }
+    string to_netlist_string() const override;
+    void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
+               const vector < double > & p) override;
+};
+
+class Diode: public Component {
+public: bool is_on = false;
+    const double Ron = 1e-3;
+    const double Roff = 1e9;
+    Diode(const string & name,
+          const string & n1,
+          const string & n2,
+          const string & model);
+    ComponentType get_type() const override {
+        return ComponentType::Diode;
+    }
     string to_netlist_string() const override;
     void stamp(Circuit & circuit, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
                const vector < double > & p) override;
@@ -322,6 +375,7 @@ void Circuit::clear() {
     inductor_list.clear();
     vcvs_list.clear();
     ccvs_list.clear();
+    diode_list.clear();
     ground_node_exists = false;
     ground_node_explicit_name = GROUND_NODE_NAME_CONST;
     tran_solved = false;
@@ -418,6 +472,12 @@ void Circuit::add_component(unique_ptr < Component > comp) {
     components.push_back(move(comp));
 }
 
+int Circuit::get_node_matrix_index(const string & node_name) const {
+    if (is_ground(node_name)) return -1;
+    auto it = node_to_idx.find(node_name);
+    return (it != node_to_idx.end()) ? it -> second : -2;
+}
+
 int Circuit::prepare_for_analysis() {
     node_to_idx.clear();
     idx_to_node_name.clear();
@@ -425,6 +485,7 @@ int Circuit::prepare_for_analysis() {
     inductor_list.clear();
     vcvs_list.clear();
     ccvs_list.clear();
+    diode_list.clear();
     set < string > unique_node_names;
     for (const auto & comp: components) {
         unique_node_names.insert(comp -> node1_name);
@@ -433,6 +494,7 @@ int Circuit::prepare_for_analysis() {
         else if (auto ind = dynamic_cast < Inductor * > (comp.get())) inductor_list.push_back(ind);
         else if (auto vcvs = dynamic_cast < VCVS * > (comp.get())) vcvs_list.push_back(vcvs);
         else if (auto ccvs = dynamic_cast < CCVS * > (comp.get())) ccvs_list.push_back(ccvs);
+        else if (auto d = dynamic_cast < Diode * > (comp.get())) diode_list.push_back(d);
     }
     if (!ground_node_exists && (unique_node_names.count("0") || unique_node_names.count("GND"))) {
         set_ground_node(unique_node_names.count("0") ? "0" : "GND");
@@ -450,10 +512,10 @@ int Circuit::prepare_for_analysis() {
 void Circuit::build_mna_matrix(vector < vector < double >> & A, vector < double > & z, double h,
                                const vector < double > & prev_sol) {
     if (!components.empty() && !ground_node_exists) throw runtime_error("No ground node defined.");
-    int N = prepare_for_analysis();
+    int N = idx_to_node_name.size();
     int M = voltage_source_list.size() + inductor_list.size() + vcvs_list.size() + ccvs_list.size();
     int system_size = N + M;
-    if (system_size == 0) {
+    if (system_size == 0 && diode_list.empty()) {
         A.clear();
         z.clear();
         return;
@@ -512,6 +574,8 @@ void Circuit::calculate_and_store_passive_currents(ResultPoint & result_point,
             } else {
                 result_point["I(" + c -> name + ")"] = 0.0;
             }
+        } else if (auto d = dynamic_cast < Diode * > (comp.get())) {
+            result_point["I(" + d -> name + ")"] = (v1 - v2) / (d -> is_on ? d -> Ron : d -> Roff);
         }
     }
 }
@@ -523,23 +587,48 @@ void Circuit::perform_transient_analysis(double t_step, double t_stop) {
 
     int N = prepare_for_analysis();
     int M = voltage_source_list.size() + inductor_list.size() + vcvs_list.size() + ccvs_list.size();
-    if (N + M == 0) {
+    if (N + M == 0 && diode_list.empty()) {
         tran_solved = true;
         return;
     }
+
+    for (auto * d: diode_list) d -> is_on = false;
 
     vector < double > prev_solution(N + M, 0.0);
     ResultPoint prev_result_point;
 
     for (double t = 0; t <= t_stop + (t_step / 2.0); t += t_step) {
-        for (auto & comp: components) {
-            comp -> update_time_dependant_value(t);
-        }
-        vector < vector < double >> A;
-        vector < double > z;
-        build_mna_matrix(A, z, t_step, prev_solution);
+        for (auto & comp: components) comp -> update_time_dependant_value(t);
 
-        vector < double > current_solution = gaussian_elimination_matrix(A, z);
+        const int MAX_DIODE_ITERATIONS = 100;
+        bool diodes_converged = false;
+        vector < double > current_solution;
+
+        for (int iter = 0; iter < MAX_DIODE_ITERATIONS; ++iter) {
+            vector < vector < double >> A;
+            vector < double > z;
+            build_mna_matrix(A, z, t_step, prev_solution);
+            current_solution = gaussian_elimination_matrix(A, z);
+
+            if (diode_list.empty()) {
+                diodes_converged = true;
+                break;
+            }
+
+            bool state_changed = false;
+            for (auto * d: diode_list) {
+                bool old_state = d -> is_on;
+                double v1 = (get_node_matrix_index(d -> node1_name) >= 0) ? current_solution[get_node_matrix_index(d -> node1_name)] : 0.0;
+                double v2 = (get_node_matrix_index(d -> node2_name) >= 0) ? current_solution[get_node_matrix_index(d -> node2_name)] : 0.0;
+                d -> is_on = (v1 > v2);
+                if (d -> is_on != old_state) state_changed = true;
+            }
+            if (!state_changed) {
+                diodes_converged = true;
+                break;
+            }
+        }
+        if (!diodes_converged) throw runtime_error("Diode model failed to converge at time " + to_string(t));
 
         ResultPoint result_at_t;
         result_at_t["time"] = t;
@@ -581,23 +670,48 @@ void Circuit::perform_dc_sweep_analysis(const string & src, double start, double
 
     double orig_val = sweep_comp -> value;
     dc_sweep_source_name = src;
-
     int N = prepare_for_analysis();
     int M = voltage_source_list.size() + inductor_list.size() + vcvs_list.size() + ccvs_list.size();
-    if (N + M == 0) {
+    if (N + M == 0 && diode_list.empty()) {
         dc_sweep_solved = true;
         return;
     }
+
+    for (auto * d: diode_list) d -> is_on = false;
 
     for (double val = start;
          (inc > 0) ? (val <= end + abs(inc) / 2.0) : (val >= end - abs(inc) / 2.0); val += inc) {
         sweep_comp -> value = val;
 
-        vector < vector < double >> A;
-        vector < double > z;
-        build_mna_matrix(A, z, 0.0, {});
+        const int MAX_DIODE_ITERATIONS = 100;
+        bool diodes_converged = false;
+        vector < double > solution;
 
-        vector < double > solution = gaussian_elimination_matrix(A, z);
+        for (int iter = 0; iter < MAX_DIODE_ITERATIONS; ++iter) {
+            vector < vector < double >> A;
+            vector < double > z;
+            build_mna_matrix(A, z, 0.0, {});
+            solution = gaussian_elimination_matrix(A, z);
+
+            if (diode_list.empty()) {
+                diodes_converged = true;
+                break;
+            }
+
+            bool state_changed = false;
+            for (auto * d: diode_list) {
+                bool old_state = d -> is_on;
+                double v1 = (get_node_matrix_index(d -> node1_name) >= 0 && get_node_matrix_index(d -> node1_name) < solution.size()) ? solution[get_node_matrix_index(d -> node1_name)] : 0.0;
+                double v2 = (get_node_matrix_index(d -> node2_name) >= 0 && get_node_matrix_index(d -> node2_name) < solution.size()) ? solution[get_node_matrix_index(d -> node2_name)] : 0.0;
+                d -> is_on = (v1 > v2);
+                if (d -> is_on != old_state) state_changed = true;
+            }
+            if (!state_changed) {
+                diodes_converged = true;
+                break;
+            }
+        }
+        if (!diodes_converged) throw runtime_error("Diode model failed to converge at sweep value " + to_string(val));
 
         ResultPoint result_at_val;
         result_at_val[src] = val;
@@ -620,6 +734,13 @@ void Circuit::perform_dc_sweep_analysis(const string & src, double start, double
     cout << "DC sweep analysis completed." << endl;
 }
 
+Resistor::Resistor(const string & name,
+                   const string & n1,
+                   const string & n2,
+                   const string & val): Component(name, n1, n2, 0.0) {
+    this -> value = parse_value_with_metric_prefix_util(val);
+    if (value <= 0) throw runtime_error("Resistor " + name + " must have positive resistance.");
+}
 string Resistor::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << value;
@@ -638,6 +759,13 @@ void Resistor::stamp(Circuit & c, vector < vector < double >> & G, vector < vect
     }
 }
 
+Capacitor::Capacitor(const string & name,
+                     const string & n1,
+                     const string & n2,
+                     const string & val): Component(name, n1, n2, 0.0) {
+    this -> value = parse_value_with_metric_prefix_util(val);
+    if (value <= 0) throw runtime_error("Capacitance must be positive.");
+}
 string Capacitor::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << value;
@@ -664,6 +792,13 @@ void Capacitor::stamp(Circuit & c, vector < vector < double >> & G, vector < vec
     }
 }
 
+Inductor::Inductor(const string & name,
+                   const string & n1,
+                   const string & n2,
+                   const string & val): Component(name, n1, n2, 0.0) {
+    this -> value = parse_value_with_metric_prefix_util(val);
+    if (value <= 0) throw runtime_error("Inductance must be positive.");
+}
 string Inductor::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << value;
@@ -779,6 +914,12 @@ void VoltageSource::update_time_dependant_value(double time) {
     }
 }
 
+CurrentSource::CurrentSource(const string & name,
+                             const string & n1,
+                             const string & n2,
+                             const string & val): Component(name, n1, n2, 0.0) {
+    this -> value = parse_value_with_metric_prefix_util(val);
+}
 string CurrentSource::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << value;
@@ -792,6 +933,14 @@ void CurrentSource::stamp(Circuit & c, vector < vector < double >> & G, vector <
     if (i2 >= 0) J[i2] += value;
 }
 
+VCVS::VCVS(const string & name,
+           const string & n1,
+           const string & n2,
+           const string & cn1,
+           const string & cn2,
+           const string & gain_str): Component(name, n1, n2, 0.0), ctrl_node1(cn1), ctrl_node2(cn2) {
+    this -> value = parse_value_with_metric_prefix_util(gain_str);
+}
 string VCVS::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << ctrl_node1 << " " << ctrl_node2 << " " << value;
@@ -804,18 +953,22 @@ void VCVS::stamp(Circuit & c, vector < vector < double >> & G, vector < vector <
     int n2_idx = c.get_node_matrix_index(node2_name);
     int cn1_idx = c.get_node_matrix_index(ctrl_node1);
     int cn2_idx = c.get_node_matrix_index(ctrl_node2);
-    if (n1_idx >= 0) {
-        B[n1_idx][m_idx] = 1.0;
-    }
-    if (n2_idx >= 0) {
-        B[n2_idx][m_idx] = -1.0;
-    }
+    if (n1_idx >= 0) B[n1_idx][m_idx] = 1.0;
+    if (n2_idx >= 0) B[n2_idx][m_idx] = -1.0;
     if (n1_idx >= 0) C[m_idx][n1_idx] = 1.0;
     if (n2_idx >= 0) C[m_idx][n2_idx] = -1.0;
     if (cn1_idx >= 0) C[m_idx][cn1_idx] -= value;
     if (cn2_idx >= 0) C[m_idx][cn2_idx] += value;
 }
 
+VCCS::VCCS(const string & name,
+           const string & n1,
+           const string & n2,
+           const string & cn1,
+           const string & cn2,
+           const string & gain_str): Component(name, n1, n2, 0.0), ctrl_node1(cn1), ctrl_node2(cn2) {
+    this -> value = parse_value_with_metric_prefix_util(gain_str);
+}
 string VCCS::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << ctrl_node1 << " " << ctrl_node2 << " " << value;
@@ -833,6 +986,13 @@ void VCCS::stamp(Circuit & c, vector < vector < double >> & G, vector < vector <
     if (n2_idx >= 0 && cn2_idx >= 0) G[n2_idx][cn2_idx] += value;
 }
 
+CCVS::CCVS(const string & name,
+           const string & n1,
+           const string & n2,
+           const string & cvn,
+           const string & gain_str): Component(name, n1, n2, 0.0), ctrl_v_name(cvn) {
+    this -> value = parse_value_with_metric_prefix_util(gain_str);
+}
 string CCVS::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << ctrl_v_name << " " << value;
@@ -852,6 +1012,13 @@ void CCVS::stamp(Circuit & c, vector < vector < double >> & G, vector < vector <
     D[m_idx_h][m_idx_ctrl] = -value;
 }
 
+CCCS::CCCS(const string & name,
+           const string & n1,
+           const string & n2,
+           const string & cvn,
+           const string & gain_str): Component(name, n1, n2, 0.0), ctrl_v_name(cvn) {
+    this -> value = parse_value_with_metric_prefix_util(gain_str);
+}
 string CCCS::to_netlist_string() const {
     ostringstream oss;
     oss << name << " " << node1_name << " " << node2_name << " " << ctrl_v_name << " " << value;
@@ -867,6 +1034,28 @@ void CCCS::stamp(Circuit & c, vector < vector < double >> & G, vector < vector <
     if (n2_idx >= 0) B[n2_idx][m_idx_ctrl] -= value;
 }
 
+Diode::Diode(const string & name,
+             const string & n1,
+             const string & n2,
+             const string & model): Component(name, n1, n2, 0.0) {
+    if (to_lower_util(model) != "ideal") throw runtime_error("Only 'ideal' diode model is supported. Got: " + model);
+}
+string Diode::to_netlist_string() const {
+    return name + " " + node1_name + " " + node2_name + " ideal";
+}
+void Diode::stamp(Circuit & c, vector < vector < double >> & G, vector < vector < double >> & B, vector < vector < double >> & C, vector < vector < double >> & D, vector < double > & J, vector < double > & E, map < string, int > & m, double h,
+                  const vector < double > & p) {
+    double conductance = 1.0 / (is_on ? Ron : Roff);
+    int i1 = c.get_node_matrix_index(node1_name);
+    int i2 = c.get_node_matrix_index(node2_name);
+    if (i1 >= 0) G[i1][i1] += conductance;
+    if (i2 >= 0) G[i2][i2] += conductance;
+    if (i1 >= 0 && i2 >= 0) {
+        G[i1][i2] -= conductance;
+        G[i2][i1] -= conductance;
+    }
+}
+
 struct Command {
     string type;
     vector < string > args;
@@ -879,6 +1068,14 @@ private: void handle_add_component(const vector < string > & args, Circuit & cir
     void handle_list_components(const Circuit & circuit);
     void handle_list_nodes(const Circuit & circuit);
     void handle_print(const vector < string > & args, Circuit & circuit);
+    void handle_load_command(const vector < string > & args, Circuit & circuit);
+    void handle_save(const vector < string > & args, Circuit & circuit);
+    void handle_show_schematics(const vector < string > & args, Circuit & circuit);
+    void handle_load_file_from_path(const vector < string > & args, Circuit & circuit);
+    void handle_add_ground(const vector < string > & args, Circuit & circuit);
+    void handle_delete_ground(const vector < string > & args, Circuit & circuit);
+    void handle_delete_component(const vector < string > & args, Circuit & circuit);
+    void handle_rename_node(const vector < string > & args, Circuit & circuit);
 };
 
 Command Parser::parse_line(const string & line) {
@@ -900,25 +1097,194 @@ Command Parser::parse_line(const string & line) {
 void Parser::execute_command(Command & cmd, Circuit & circuit) {
     try {
         string cmd_type_lower = to_lower_util(cmd.type);
-        if (cmd_type_lower == "exit" || cmd_type_lower == "quit") {
-            cout << "Exiting simulator." << endl;
-            exit(0);
-        } else if (cmd_type_lower == ".list") {
-            handle_list_components(circuit);
-        } else if (cmd_type_lower == ".nodes") {
-            handle_list_nodes(circuit);
-        } else if (cmd_type_lower == ".clear") {
-            circuit.clear();
-            cout << "Circuit cleared." << endl;
-        } else if (cmd_type_lower == ".print") {
-            handle_print(cmd.args, circuit);
-        } else {
+        set < string > known_commands = {
+                ".nodes",
+                ".list",
+                ".rename",
+                ".print",
+                ".clear",
+                ".show",
+                ".save",
+                ".load",
+                "add",
+                "delete",
+                "exit"
+        };
+        if (known_commands.find(cmd_type_lower) == known_commands.end() && !cmd.type.empty() && cmd.type[0] != '.') {
             cmd.args.insert(cmd.args.begin(), cmd.type);
-            handle_add_component(cmd.args, circuit);
+            cmd.type = "add";
+            cmd_type_lower = "add";
+        }
+        if (cmd_type_lower == "add") {
+            if (cmd.args.empty()) throw runtime_error("Usage: add <item> ...");
+            if (to_lower_util(cmd.args[0]) == "gnd") handle_add_ground(cmd.args, circuit);
+            else handle_add_component(cmd.args, circuit);
+        } else if (cmd_type_lower == "delete") {
+            if (cmd.args.empty()) throw runtime_error("Usage: delete <item> ...");
+            if (to_lower_util(cmd.args[0]) == "gnd") handle_delete_ground(cmd.args, circuit);
+            else handle_delete_component(cmd.args, circuit);
+        } else if (cmd_type_lower == ".nodes") handle_list_nodes(circuit);
+        else if (cmd_type_lower == ".list") handle_list_components(circuit);
+        else if (cmd_type_lower == ".rename") {
+            handle_rename_node(cmd.args, circuit);
+        } else if (cmd_type_lower == ".print") handle_print(cmd.args, circuit);
+        else if (cmd_type_lower == ".clear") circuit.clear();
+        else if (cmd_type_lower == ".show") handle_show_schematics(cmd.args, circuit);
+        else if (cmd_type_lower == ".save") {
+            handle_save(cmd.args, circuit);
+        } else if (cmd_type_lower == ".load") handle_load_command(cmd.args, circuit);
+        else if (cmd_type_lower == "exit" || cmd.type.empty()) {} else cerr << "Error: Unknown command '" << cmd.type << "'" << endl;
+        if (circuit.is_dirty && !circuit.current_filepath.empty() && cmd_type_lower != ".save") {
+            cout << "INFO: Auto-saving changes to " << circuit.current_filepath << "..." << endl;
+            circuit.save_to_file(circuit.current_filepath);
         }
     } catch (const exception & e) {
         cerr << "Error: " << e.what() << endl;
     }
+}
+
+void Parser::handle_load_command(const vector < string > & args, Circuit & circuit) {
+    if (args.empty()) {
+        cout << "Enter filepath to load: ";
+        string path;
+        getline(cin, path);
+        path = trim_string_util(path);
+        if (path.empty()) {
+            cout << "Load cancelled." << endl;
+            return;
+        }
+        handle_load_file_from_path({
+                                           path
+                                   }, circuit);
+    } else {
+        handle_load_file_from_path(args, circuit);
+    }
+}
+
+void Parser::handle_save(const vector < string > & args, Circuit & circuit) {
+    string filename_or_path;
+    if (args.empty()) {
+        cout << "Enter filename to save (or full path): ";
+        getline(cin, filename_or_path);
+        filename_or_path = trim_string_util(filename_or_path);
+        if (filename_or_path.empty()) {
+            cout << "Save cancelled." << endl;
+            return;
+        }
+    } else {
+        filename_or_path = args[0];
+        for (size_t i = 1; i < args.size(); ++i) filename_or_path += " " + args[i];
+    }
+    string final_path = filename_or_path;
+    if (filename_or_path.find('\\') == string::npos && filename_or_path.find('/') == string::npos) {
+        final_path = SCHEMATICS_DIR + filename_or_path;
+    }
+    if (final_path.length() < 4 || to_lower_util(final_path.substr(final_path.length() - 4)) != ".txt") {
+        final_path += ".txt";
+    }
+    circuit.save_to_file(final_path);
+}
+
+void Parser::handle_show_schematics(const vector < string > & args, Circuit & circuit) {
+    if (args.size() != 2 || to_lower_util(args[0]) != "existing" || to_lower_util(args[1]) != "schematics") {
+        throw runtime_error("Unknown command. Did you mean '.show existing schematics'?");
+    }
+    while (true) {
+        vector < string > schematics;
+#ifdef _WIN32
+        string search_path = SCHEMATICS_DIR + "*.txt";
+        WIN32_FIND_DATA fd;
+        HANDLE hFind = FindFirstFile(search_path.c_str(), & fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                schematics.push_back(fd.cFileName);
+            } while (FindNextFile(hFind, & fd) != 0);
+            FindClose(hFind);
+        }
+#else
+        // Linux/macOS implementation would go here
+#endif
+        cout << "-choose existing schematic:" << endl;
+        if (schematics.empty()) cout << "  (No .txt files found in '" << SCHEMATICS_DIR << "' directory)" << endl;
+        else
+            for (size_t i = 0; i < schematics.size(); ++i) cout << i + 1 << "-" << schematics[i] << endl;
+        string choice;
+        if (!getline(cin, choice)) break;
+        choice = trim_string_util(to_lower_util(choice));
+        if (choice == "return") {
+            cout << "Returning to main menu." << endl;
+            break;
+        }
+        try {
+            int index = stoi(choice);
+            if (index < 1 || index > schematics.size()) cout << "-Error : Inappropriate input" << endl;
+            else {
+                string filename = schematics[index - 1];
+                handle_load_file_from_path({
+                                                   filename
+                                           }, circuit);
+                cout << "--- Loaded Circuit Status ---" << endl;
+                handle_list_components(circuit);
+                handle_list_nodes(circuit);
+                cout << "---------------------------" << endl;
+                break;
+            }
+        } catch (const exception & ) {
+            cout << "-Error : Inappropriate input" << endl;
+        }
+    }
+}
+
+void Parser::handle_load_file_from_path(const vector < string > & args, Circuit & circuit) {
+    if (args.size() != 1) throw runtime_error("Usage: requires a filename.");
+    string filepath = args[0];
+    if (filepath.find('/') == string::npos && filepath.find('\\') == string::npos) filepath = SCHEMATICS_DIR + filepath;
+    ifstream file(filepath);
+    if (!file.is_open()) throw runtime_error("Cannot open file: " + filepath);
+    circuit.clear();
+    circuit.current_filepath = filepath;
+    string line;
+    int line_num = 0;
+    cout << "INFO: Loading netlist from: " << filepath << endl;
+    while (getline(file, line)) {
+        line_num++;
+        line = trim_string_util(line);
+        if (line.empty() || line[0] == '*') continue;
+        if (to_lower_util(line) == ".end") {
+            cout << "INFO: '.end' directive found. Finished loading." << endl;
+            break;
+        }
+        cout << "  > Executing from file: " << line << endl;
+        try {
+            Command cmd = parse_line(line);
+            string temp_path = circuit.current_filepath;
+            circuit.current_filepath = "";
+            execute_command(cmd, circuit);
+            circuit.current_filepath = temp_path;
+        } catch (const exception & e) {
+            cerr << "ERROR on line " << line_num << " ('" << line << "'): " << e.what() << endl;
+            circuit.clear();
+            throw runtime_error("Failed to load file due to error.");
+        }
+    }
+    circuit.is_dirty = false;
+}
+
+void Parser::handle_add_ground(const vector < string > & args, Circuit & circuit) {
+    if (args.size() != 2) throw runtime_error("Usage: add GND <node>");
+    circuit.set_ground_node(args[1]);
+}
+void Parser::handle_delete_ground(const vector < string > & args, Circuit & circuit) {
+    if (args.size() != 2) throw runtime_error("Usage: delete GND <node>");
+    circuit.delete_ground_node(args[1]);
+}
+void Parser::handle_delete_component(const vector < string > & args, Circuit & circuit) {
+    if (args.size() != 1) throw runtime_error("Usage: delete <comp_name>");
+    circuit.delete_component(args[0]);
+}
+void Parser::handle_rename_node(const vector < string > & args, Circuit & circuit) {
+    if (args.size() != 3 || to_lower_util(args[0]) != "node") throw runtime_error("Invalid syntax");
+    circuit.rename_node(args[1], args[2]);
 }
 
 void Parser::handle_add_component(const vector < string > & args, Circuit & circuit) {
@@ -963,6 +1329,11 @@ void Parser::handle_add_component(const vector < string > & args, Circuit & circ
         case 'F': {
             if (args.size() != 5) throw runtime_error("Incorrect argument count for CCCS (F).");
             circuit.add_component(make_unique < CCCS > (name, args[1], args[2], args[3], args[4]));
+            break;
+        }
+        case 'D': {
+            if (args.size() != 4) throw runtime_error("Incorrect argument count for Diode (D).");
+            circuit.add_component(make_unique < Diode > (name, args[1], args[2], args[3]));
             break;
         }
         default:
